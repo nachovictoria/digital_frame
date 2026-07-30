@@ -1,0 +1,52 @@
+{
+    "ical_url": "url",
+    "gmail_user": "email",
+    "gmail_app_password": "apppassword",
+    "smtp_server": "smtp.gmail.com",
+    "smtp_port": 465,
+    "imap_server": "imap.gmail.com",
+    "slideshow_interval_sec": 10,
+    "email_poll_interval_sec": 30,
+    "cities": [
+        {
+            "name": "location1",
+            "code": "shortcode",
+            "lat": number,
+            "lon": number
+        },
+        {
+            "name": "location2",
+            "code": "shortcode",
+            "lat": number,
+            "lon": number
+        },
+        {
+            "name": "location3",
+            "code": "shortcode",
+            "lat": number,
+            "lon": number
+        }
+    ],
+    "distribution_list": [
+        {
+            "name": "name1",
+            "email": "email1"
+        },
+        {
+            "name": "name2",
+            "email": "email2"
+        },
+        {
+            "name": "name3",
+            "email": "email3"
+        },
+        {
+            "name": "name4",
+            "email": "email4"
+        },
+        {
+            "name": "name5",
+            "email": "email5"
+        }
+    ]
+}
