@@ -223,4 +223,4 @@ sudo systemctl start marco-digital
 
 ## 📄 License
 
-This project is provided as-is for personal and family use.
+MIT License. See [LICENSE](LICENSE)
