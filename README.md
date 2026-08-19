@@ -18,6 +18,8 @@ A fullscreen **Tkinter** application for a touchscreen Raspberry Pi that combine
 | **📅 Calendar Week View** | Displays events from a shared iCal calendar (Google, Outlook, etc.) with week-by-week navigation and a "Today" button. |
 | **🌤️ 3-City Weather** | Shows a 14-day forecast for three configurable cities using the free [Open-Meteo API](https://open-meteo.com) (no API key required). |
 | **🛒 Shopping List** | Persistent JSON-backed list with checkboxes. Add items manually via a Spanish on-screen keyboard, or remotely by sending an email with subject **"compra"**. Send the list to selected family members. |
+| **📋 Monthly Tasks** | Persistent JSON-backed tasks list. Add tasks manually, clear them, or let them auto-reset at the start of every month. |
+| **🌙 Night Mode** | Screen automatically goes black during configured hours to prevent glare, waking instantly on touch. |
 | **➕ Event Creation** | Create events with a touch-friendly date/time picker and send `.ics` calendar invites to the entire distribution list. |
 | **📧 Background Email Poller** | A daemon thread checks Gmail every 30 seconds for new shopping items (subject: `compra`) and new photos (subject: `foto`). |
 | **⌨️ Spanish Keyboard** | Built-in on-screen QWERTY keyboard with `Ñ`, accented vowels (`á é í ó ú`), `¿`, `¡`, and symbol layers. |
@@ -30,6 +32,7 @@ A fullscreen **Tkinter** application for a touchscreen Raspberry Pi that combine
 carrusel_marco.py      ← Single-file application (~1400 lines)
 config.json            ← All credentials, URLs, locations (not tracked by git)
 lista_compra.json      ← Shopping list data (auto-created)
+tareas.json            ← Monthly tasks data (auto-created)
 fotos/                 ← Photo folder (auto-created, add your images here)
 ```
 
@@ -41,12 +44,12 @@ fotos/                 ← Photo folder (auto-created, add your images here)
 │  (idle)      │ ◄─────── │  Week View   │
 └──────────────┘  "Fotos" └──────┬───────┘
                                  │
-                    ┌────────────┼────────────┐
-                    ▼            ▼            ▼
-             ┌───────────┐ ┌──────────┐ ┌──────────┐
-             │  Event    │ │ Shopping │ │  Back to │
-             │ Creation  │ │   List   │ │ Slideshow│
-             └───────────┘ └──────────┘ └──────────┘
+                   ┌─────────────┼─────────────┬─────────────┐
+                   ▼             ▼             ▼             ▼
+            ┌───────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+            │  Event    │ │ Shopping │ │  Tareas  │ │  Back to │
+            │ Creation  │ │   List   │ │          │ │ Slideshow│
+            └───────────┘ └──────────┘ └──────────┘ └──────────┘
 ```
 
 ---
@@ -86,6 +89,9 @@ Create a `config.json` file in the project root (a template is auto-generated on
   "imap_server": "imap.gmail.com",
   "slideshow_interval_sec": 10,
   "email_poll_interval_sec": 30,
+  "night_mode_start_h": 20,
+  "night_mode_end_h": 8,
+  "night_mode_timeout_sec": 60,
   "cities": [
     { "name": "City One",   "code": "C1", "lat": 40.4739, "lon": -3.9450 },
     { "name": "City Two",   "code": "C2", "lat": 52.0406, "lon": -0.7594 },
@@ -131,6 +137,9 @@ The app launches in fullscreen. Press **Esc** to exit.
 | `imap_server` | `string` | IMAP server address (e.g. `imap.gmail.com`) |
 | `slideshow_interval_sec` | `int` | Seconds between photo transitions (default: `10`) |
 | `email_poll_interval_sec` | `int` | Seconds between email checks (default: `30`) |
+| `night_mode_start_h` | `int` | Hour to start Night Mode (default: `20` for 20:00) |
+| `night_mode_end_h` | `int` | Hour to end Night Mode (default: `8` for 08:00) |
+| `night_mode_timeout_sec` | `int` | Inactivity seconds before black screen at night (default: `60`) |
 | `cities` | `array` | List of cities with `name`, `code`, `lat`, `lon` for weather |
 | `distribution_list` | `array` | List of people with `name` and `email` for invites/shopping |
 
@@ -223,4 +232,4 @@ sudo systemctl start marco-digital
 
 ## 📄 License
 
-MIT License. See [LICENSE](LICENSE)
+This project is provided as-is for personal and family use.

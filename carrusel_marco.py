@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Marco Digital — Raspberry Pi Digital Photo Frame
 =================================================
@@ -8,6 +8,7 @@ Features:
   - Shopping list: email polling + manual input with Spanish keyboard
   - Event creation: sends .ics calendar invite to distribution list
   - Background email polling every 30s for "compra" and "foto" subjects
+  - To do list
 
 Dependencies:
   pip install Pillow icalendar recurring-ical-events requests
@@ -60,8 +61,9 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 FOTOS_DIR = os.path.join(SCRIPT_DIR, "fotos")
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "config.json")
 SHOPPING_FILE = os.path.join(SCRIPT_DIR, "lista_compra.json")
+TAREAS_FILE = os.path.join(SCRIPT_DIR, "tareas.json")
 
-SCREEN_W, SCREEN_H = 800, 480
+SCREEN_W, SCREEN_H = 1024, 600
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp")
 
 # Cities for weather are loaded from config.json ("cities" key)
@@ -144,6 +146,9 @@ def load_config():
             "imap_server": "",
             "slideshow_interval_sec": 10,
             "email_poll_interval_sec": 30,
+            "night_mode_start_h": 20,
+            "night_mode_end_h": 8,
+            "night_mode_timeout_sec": 60,
             "cities": [
                 {"name": "", "code": "", "lat": 0, "lon": 0}
             ],
@@ -224,6 +229,79 @@ class ShoppingListManager:
     def get_unchecked_texts(self):
         with self._lock:
             return [i["text"] for i in self.items if not i["checked"]]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# TAREAS PERSISTENCE
+# ═══════════════════════════════════════════════════════════════════════
+
+class TareasManager:
+    """Thread-safe JSON-backed tasks list, resets monthly."""
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._load()
+
+    def _load(self):
+        now = datetime.datetime.now()
+        current_month = f"{now.year}-{now.month:02d}"
+        if os.path.exists(TAREAS_FILE):
+            try:
+                with open(TAREAS_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self.items = data.get("items", [])
+                    self.last_reset = data.get("last_reset", current_month)
+            except Exception:
+                self.items = []
+                self.last_reset = current_month
+        else:
+            self.items = []
+            self.last_reset = current_month
+            self._save()
+            
+        self._check_reset(current_month)
+
+    def _check_reset(self, current_month):
+        if self.last_reset != current_month:
+            for item in self.items:
+                item["checked"] = False
+            self.last_reset = current_month
+            self._save()
+
+    def _save(self):
+        with open(TAREAS_FILE, "w", encoding="utf-8") as f:
+            json.dump({
+                "items": self.items,
+                "last_reset": self.last_reset
+            }, f, indent=2, ensure_ascii=False)
+
+    def toggle(self, idx):
+        with self._lock:
+            now = datetime.datetime.now()
+            self._check_reset(f"{now.year}-{now.month:02d}")
+            if 0 <= idx < len(self.items):
+                self.items[idx]["checked"] = not self.items[idx]["checked"]
+                self._save()
+
+    def get_items(self):
+        with self._lock:
+            now = datetime.datetime.now()
+            self._check_reset(f"{now.year}-{now.month:02d}")
+            return list(self.items)
+
+    def add_item(self, text):
+        with self._lock:
+            text = text.strip()
+            if text:
+                now = datetime.datetime.now()
+                self._check_reset(f"{now.year}-{now.month:02d}")
+                self.items.append({"text": text, "checked": False,
+                                   "added": datetime.datetime.now().isoformat()})
+                self._save()
+
+    def remove_checked(self):
+        with self._lock:
+            self.items = [i for i in self.items if not i["checked"]]
+            self._save()
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -570,7 +648,7 @@ class SpanishKeyboard(tk.Frame):
                     bg  = C["key_bg"]
                     cmd = lambda k=key: self._type(k)
                     w   = 3
-                tk.Button(rf, text=key, font=("Arial", 13), bg=bg,
+                tk.Button(rf, text=key, font=("Arial", 19), bg=bg,
                           fg=C["text"], activebackground=C["accent_hi"],
                           relief=tk.FLAT, bd=0, width=w, height=1,
                           command=cmd).pack(side=tk.LEFT, padx=1, expand=True, fill=tk.X)
@@ -580,17 +658,17 @@ class SpanishKeyboard(tk.Frame):
         bf.pack(fill=tk.X, padx=2, pady=1)
 
         abg = C["accent"] if self._accent else C["key_sp"]
-        tk.Button(bf, text="ÁÉÍ", font=("Arial", 11), bg=abg, fg=C["text"],
+        tk.Button(bf, text="ÁÉÍ", font=("Arial", 17), bg=abg, fg=C["text"],
                   activebackground=C["accent_hi"], relief=tk.FLAT, bd=0,
                   width=5, height=1, command=self._toggle_accent
                   ).pack(side=tk.LEFT, padx=1)
 
-        tk.Button(bf, text="", font=("Arial", 13), bg=C["key_bg"], fg=C["text"],
+        tk.Button(bf, text="", font=("Arial", 19), bg=C["key_bg"], fg=C["text"],
                   activebackground=C["accent_hi"], relief=tk.FLAT, bd=0,
                   height=1, command=lambda: self._type(" ")
                   ).pack(side=tk.LEFT, padx=1, expand=True, fill=tk.X)
 
-        tk.Button(bf, text="↵", font=("Arial", 14, "bold"), bg=C["success"],
+        tk.Button(bf, text="↵", font=("Arial", 26, "bold"), bg=C["success"],
                   fg=C["bg"], activebackground=C["accent_hi"],
                   relief=tk.FLAT, bd=0, width=5, height=1,
                   command=self._enter).pack(side=tk.LEFT, padx=1)
@@ -645,7 +723,7 @@ class SlideshowScreen(tk.Frame):
         self.label = tk.Label(self, bg="black")
         self.label.pack(expand=True, fill=tk.BOTH)
 
-        self.clock = tk.Label(self, text="", font=("Arial", 16, "bold"),
+        self.clock = tk.Label(self, text="", font=("Arial", 22, "bold"),
                               fg="white", bg="black")
         self.clock.place(relx=0.97, rely=0.96, anchor=tk.SE)
 
@@ -681,7 +759,7 @@ class SlideshowScreen(tk.Frame):
         if not self.photos:
             self.label.config(image="",
                               text="No hay fotos en 'fotos/'",
-                              font=("Arial", 18), fg=C["text_muted"])
+                              font=("Arial", 30), fg=C["text_muted"])
             self._after_id = self.after(5000, self._next)
             return
 
@@ -692,11 +770,29 @@ class SlideshowScreen(tk.Frame):
             img = Image.open(self.photos[self.idx])
             img = self._fix_orientation(img)
 
-            # scale to fit, keep aspect ratio
-            sw, sh = SCREEN_W, SCREEN_H
+            # get actual window size (fallback to constants if not rendered yet)
+            sw = self.winfo_width()
+            sh = self.winfo_height()
+            if sw < 100 or sh < 100:
+                sw, sh = SCREEN_W, SCREEN_H
+
             iw, ih = img.size
-            ratio  = min(sw / iw, sh / ih)
-            img    = img.resize((int(iw * ratio), int(ih * ratio)), Image.LANCZOS)
+            
+            if iw >= ih:
+                # Landscape: scale to fill (no black bars), crop excess
+                ratio  = max(sw / iw, sh / ih)
+                new_w, new_h = int(iw * ratio), int(ih * ratio)
+                img    = img.resize((new_w, new_h), Image.LANCZOS)
+                
+                # center crop to exact screen size
+                left = (new_w - sw) // 2
+                top = (new_h - sh) // 2
+                img = img.crop((left, top, left + sw, top + sh))
+            else:
+                # Portrait: scale to fit (see whole photo), no cropping
+                ratio  = min(sw / iw, sh / ih)
+                new_w, new_h = int(iw * ratio), int(ih * ratio)
+                img    = img.resize((new_w, new_h), Image.LANCZOS)
 
             self._photo_ref = ImageTk.PhotoImage(img)
             self.label.config(image=self._photo_ref, text="")
@@ -748,21 +844,21 @@ class CalendarScreen(tk.Frame):
         hdr.pack(fill=tk.X)
         hdr.pack_propagate(False)
 
-        self.btn_prev = tk.Button(hdr, text="◀", font=("Arial", 20, "bold"),
+        self.btn_prev = tk.Button(hdr, text="◀", font=("Arial", 26, "bold"),
             bg=C["bg_header"], fg=C["text"], activebackground=C["secondary"],
             relief=tk.FLAT, bd=0, width=3, command=self._prev)
         self.btn_prev.pack(side=tk.LEFT, padx=4)
 
-        self.lbl_week = tk.Label(hdr, text="", font=("Arial", 13, "bold"),
+        self.lbl_week = tk.Label(hdr, text="", font=("Arial", 30, "bold"),
             bg=C["bg_header"], fg=C["text"])
         self.lbl_week.pack(side=tk.LEFT, expand=True)
 
-        self.btn_next = tk.Button(hdr, text="▶", font=("Arial", 20, "bold"),
+        self.btn_next = tk.Button(hdr, text="▶", font=("Arial", 26, "bold"),
             bg=C["bg_header"], fg=C["text"], activebackground=C["secondary"],
             relief=tk.FLAT, bd=0, width=3, command=self._next)
         self.btn_next.pack(side=tk.LEFT, padx=4)
 
-        tk.Button(hdr, text="HOY", font=("Arial", 11, "bold"),
+        tk.Button(hdr, text="HOY", font=("Arial", 22, "bold"),
             bg=C["accent"], fg=C["text"], activebackground=C["accent_hi"],
             relief=tk.FLAT, bd=0, padx=10,
             command=self._today).pack(side=tk.RIGHT, padx=8)
@@ -780,8 +876,9 @@ class CalendarScreen(tk.Frame):
             ("🏠 Fotos",   C["secondary"], C["text"], self.app.show_slideshow),
             ("➕ Evento",  C["accent"],    C["text"], self.app.show_event_creation),
             ("🛒 Compra",  C["success"],   C["bg"],   self.app.show_shopping),
+            ("📋 Tareas",  C["warning"],   C["bg"],   self.app.show_tareas),
         ]:
-            tk.Button(foot, text=txt, font=("Arial", 12, "bold"),
+            tk.Button(foot, text=txt, font=("Arial", 22, "bold"),
                 bg=clr, fg=fg, activebackground=C["accent_hi"],
                 relief=tk.FLAT, bd=0, padx=12,
                 command=cmd).pack(side=tk.LEFT, padx=4, pady=5, expand=True, fill=tk.X)
@@ -834,7 +931,7 @@ class CalendarScreen(tk.Frame):
             dh  = tk.Frame(cell, bg=hbg)
             dh.pack(fill=tk.X)
             tk.Label(dh, text=f"{DIAS_CORTO[col]} {day.day}",
-                     font=("Arial", 10, "bold"), bg=hbg, fg=C["text"]).pack(pady=2)
+                     font=("Arial", 26, "bold"), bg=hbg, fg=C["text"]).pack(pady=2)
 
             # weather
             ds = day.strftime("%Y-%m-%d")
@@ -848,7 +945,7 @@ class CalendarScreen(tk.Frame):
                 else:
                     t  = f"{city['code']} —"
                     fg = C["text_dim"]
-                tk.Label(wf, text=t, font=("Arial", 8), bg=bg, fg=fg,
+                tk.Label(wf, text=t, font=("Arial", 30), bg=bg, fg=fg,
                          anchor="w").pack(fill=tk.X)
 
             tk.Frame(cell, bg=C["border"], height=1).pack(fill=tk.X, pady=2)
@@ -865,10 +962,10 @@ class CalendarScreen(tk.Frame):
                 if len(label) > 16:
                     label = label[:15] + "…"
                 fc = C["warning"] if ev["all_day"] else C["text"]
-                tk.Label(ef, text=label, font=("Arial", 8), bg=bg, fg=fc,
+                tk.Label(ef, text=label, font=("Arial", 30), bg=bg, fg=fc,
                          anchor="w", wraplength=100).pack(fill=tk.X)
             if len(devs) > 6:
-                tk.Label(ef, text=f"+{len(devs)-6} más", font=("Arial", 7),
+                tk.Label(ef, text=f"+{len(devs)-6} más", font=("Arial", 17),
                          bg=bg, fg=C["text_dim"]).pack(fill=tk.X)
 
     def _day_events(self, target):
@@ -922,7 +1019,7 @@ class EventCreationScreen(tk.Frame):
         hdr = tk.Frame(self, bg=C["bg_header"], height=42)
         hdr.pack(fill=tk.X)
         hdr.pack_propagate(False)
-        tk.Label(hdr, text="➕ Nuevo Evento", font=("Arial", 13, "bold"),
+        tk.Label(hdr, text="➕ Nuevo Evento", font=("Arial", 19, "bold"),
                  bg=C["bg_header"], fg=C["text"]).pack(side=tk.LEFT, padx=12)
 
         # form
@@ -933,16 +1030,16 @@ class EventCreationScreen(tk.Frame):
         now = datetime.datetime.now()
 
         # título
-        tk.Label(form, text="Título:", font=("Arial", 11), bg=C["bg"],
+        tk.Label(form, text="Título:", font=("Arial", 17), bg=C["bg"],
                  fg=C["text"]).grid(row=0, column=0, sticky="w", pady=2)
-        self.e_title = tk.Entry(form, font=("Arial", 12), bg=C["bg_card"],
+        self.e_title = tk.Entry(form, font=("Arial", 30), bg=C["bg_card"],
                                 fg=C["text"], insertbackground=C["text"],
                                 relief=tk.FLAT, bd=2)
         self.e_title.grid(row=0, column=1, sticky="ew", padx=5, pady=2)
         self.e_title.bind("<FocusIn>", lambda e: self._focus(self.e_title))
 
         # fecha
-        tk.Label(form, text="Fecha:", font=("Arial", 11), bg=C["bg"],
+        tk.Label(form, text="Fecha:", font=("Arial", 17), bg=C["bg"],
                  fg=C["text"]).grid(row=1, column=0, sticky="w", pady=2)
         df = tk.Frame(form, bg=C["bg"])
         df.grid(row=1, column=1, sticky="w", padx=5, pady=2)
@@ -951,41 +1048,41 @@ class EventCreationScreen(tk.Frame):
         self.v_month = tk.IntVar(value=now.month)
         self.v_year  = tk.IntVar(value=now.year)
         self._spinner(df, self.v_day,   1, 31,   w=3, key="day")
-        tk.Label(df, text="/", font=("Arial", 13, "bold"),
+        tk.Label(df, text="/", font=("Arial", 19, "bold"),
                  bg=C["bg"], fg=C["text"]).pack(side=tk.LEFT)
         self._spinner(df, self.v_month, 1, 12,   w=3, key="month")
-        tk.Label(df, text="/", font=("Arial", 13, "bold"),
+        tk.Label(df, text="/", font=("Arial", 19, "bold"),
                  bg=C["bg"], fg=C["text"]).pack(side=tk.LEFT)
         self._spinner(df, self.v_year,  2024, 2035, w=5, key="year")
 
         # hora inicio
-        tk.Label(form, text="Inicio:", font=("Arial", 11), bg=C["bg"],
+        tk.Label(form, text="Inicio:", font=("Arial", 17), bg=C["bg"],
                  fg=C["text"]).grid(row=2, column=0, sticky="w", pady=2)
         tf1 = tk.Frame(form, bg=C["bg"])
         tf1.grid(row=2, column=1, sticky="w", padx=5, pady=2)
         self.v_sh = tk.IntVar(value=now.hour)
         self.v_sm = tk.IntVar(value=0)
         self._spinner(tf1, self.v_sh, 0, 23, w=3, key="sh")
-        tk.Label(tf1, text=":", font=("Arial", 13, "bold"),
+        tk.Label(tf1, text=":", font=("Arial", 19, "bold"),
                  bg=C["bg"], fg=C["text"]).pack(side=tk.LEFT)
         self._spinner(tf1, self.v_sm, 0, 59, w=3, step=15, key="sm")
 
         # hora fin
-        tk.Label(form, text="Fin:", font=("Arial", 11), bg=C["bg"],
+        tk.Label(form, text="Fin:", font=("Arial", 17), bg=C["bg"],
                  fg=C["text"]).grid(row=3, column=0, sticky="w", pady=2)
         tf2 = tk.Frame(form, bg=C["bg"])
         tf2.grid(row=3, column=1, sticky="w", padx=5, pady=2)
         self.v_eh = tk.IntVar(value=(now.hour + 1) % 24)
         self.v_em = tk.IntVar(value=0)
         self._spinner(tf2, self.v_eh, 0, 23, w=3, key="eh")
-        tk.Label(tf2, text=":", font=("Arial", 13, "bold"),
+        tk.Label(tf2, text=":", font=("Arial", 19, "bold"),
                  bg=C["bg"], fg=C["text"]).pack(side=tk.LEFT)
         self._spinner(tf2, self.v_em, 0, 59, w=3, step=15, key="em")
 
         # descripción
-        tk.Label(form, text="Descripción:", font=("Arial", 11), bg=C["bg"],
+        tk.Label(form, text="Descripción:", font=("Arial", 17), bg=C["bg"],
                  fg=C["text"]).grid(row=4, column=0, sticky="w", pady=2)
-        self.e_desc = tk.Entry(form, font=("Arial", 12), bg=C["bg_card"],
+        self.e_desc = tk.Entry(form, font=("Arial", 30), bg=C["bg_card"],
                                fg=C["text"], insertbackground=C["text"],
                                relief=tk.FLAT, bd=2)
         self.e_desc.grid(row=4, column=1, sticky="ew", padx=5, pady=2)
@@ -994,17 +1091,17 @@ class EventCreationScreen(tk.Frame):
         # buttons
         bf = tk.Frame(form, bg=C["bg"])
         bf.grid(row=5, column=0, columnspan=2, pady=4)
-        tk.Button(bf, text="📧 Enviar Invitación", font=("Arial", 11, "bold"),
+        tk.Button(bf, text="📧 Enviar Invitación", font=("Arial", 17, "bold"),
                   bg=C["success"], fg=C["bg"], activebackground=C["accent_hi"],
                   relief=tk.FLAT, bd=0, padx=16, pady=4,
                   command=self._submit).pack(side=tk.LEFT, padx=8)
-        tk.Button(bf, text="Cancelar", font=("Arial", 11, "bold"),
+        tk.Button(bf, text="Cancelar", font=("Arial", 17, "bold"),
                   bg=C["accent"], fg=C["text"], activebackground=C["accent_hi"],
                   relief=tk.FLAT, bd=0, padx=16, pady=4,
                   command=self.app.show_calendar).pack(side=tk.LEFT, padx=8)
 
         # status
-        self.lbl_status = tk.Label(form, text="", font=("Arial", 10),
+        self.lbl_status = tk.Label(form, text="", font=("Arial", 22),
                                    bg=C["bg"], fg=C["success"])
         self.lbl_status.grid(row=6, column=0, columnspan=2, pady=1)
 
@@ -1035,12 +1132,12 @@ class EventCreationScreen(tk.Frame):
             var.set(v)
             lbl.config(text=fmt())
 
-        tk.Button(fr, text="▲", font=("Arial", 9), bg=C["key_sp"], fg=C["text"],
+        tk.Button(fr, text="▲", font=("Arial", 15), bg=C["key_sp"], fg=C["text"],
                   relief=tk.FLAT, bd=0, width=w, command=inc).pack()
-        lbl = tk.Label(fr, text=fmt(), font=("Arial", 12, "bold"),
+        lbl = tk.Label(fr, text=fmt(), font=("Arial", 30, "bold"),
                        bg=C["bg_card"], fg=C["text"], width=w)
         lbl.pack(pady=1)
-        tk.Button(fr, text="▼", font=("Arial", 9), bg=C["key_sp"], fg=C["text"],
+        tk.Button(fr, text="▼", font=("Arial", 15), bg=C["key_sp"], fg=C["text"],
                   relief=tk.FLAT, bd=0, width=w, command=dec).pack()
 
         if key:
@@ -1122,7 +1219,7 @@ class ShoppingListScreen(tk.Frame):
         hdr = tk.Frame(self, bg=C["bg_header"], height=42)
         hdr.pack(fill=tk.X)
         hdr.pack_propagate(False)
-        tk.Label(hdr, text="🛒 Lista de la Compra", font=("Arial", 13, "bold"),
+        tk.Label(hdr, text="🛒 Lista de la Compra", font=("Arial", 30, "bold"),
                  bg=C["bg_header"], fg=C["text"]).pack(side=tk.LEFT, padx=12)
 
         # body (dynamic)
@@ -1142,7 +1239,7 @@ class ShoppingListScreen(tk.Frame):
         items = self.app.shopping.get_items()
         if not items:
             tk.Label(self.body, text="La lista está vacía",
-                     font=("Arial", 14), bg=C["bg"],
+                     font=("Arial", 30), bg=C["bg"],
                      fg=C["text_muted"]).pack(pady=50)
             return
 
@@ -1156,13 +1253,13 @@ class ShoppingListScreen(tk.Frame):
             nav = tk.Frame(self.body, bg=C["bg"])
             nav.pack(fill=tk.X, pady=1)
             if self.scroll > 0:
-                tk.Button(nav, text="▲", font=("Arial", 10), bg=C["key_sp"],
+                tk.Button(nav, text="▲", font=("Arial", 22), bg=C["key_sp"],
                     fg=C["text"], relief=tk.FLAT, bd=0,
                     command=self._pgup).pack(side=tk.LEFT, padx=4)
             tk.Label(nav, text=f"{self.scroll+1}–{min(self.scroll+self.ITEMS_PER_PAGE, total)} / {total}",
-                     font=("Arial", 9), bg=C["bg"], fg=C["text_muted"]).pack(side=tk.LEFT, expand=True)
+                     font=("Arial", 20), bg=C["bg"], fg=C["text_muted"]).pack(side=tk.LEFT, expand=True)
             if self.scroll + self.ITEMS_PER_PAGE < total:
-                tk.Button(nav, text="▼", font=("Arial", 10), bg=C["key_sp"],
+                tk.Button(nav, text="▼", font=("Arial", 22), bg=C["key_sp"],
                     fg=C["text"], relief=tk.FLAT, bd=0,
                     command=self._pgdn).pack(side=tk.RIGHT, padx=4)
 
@@ -1176,14 +1273,14 @@ class ShoppingListScreen(tk.Frame):
             row.pack(fill=tk.X, pady=2)
 
             sym = "☑" if chk else "☐"
-            tk.Button(row, text=sym, font=("Arial", 18), bg=bg,
+            tk.Button(row, text=sym, font=("Arial", 30), bg=bg,
                       fg=C["success"] if chk else C["text"],
                       relief=tk.FLAT, bd=0, width=2,
                       command=lambda i=orig_idx: self._toggle(i)
                       ).pack(side=tk.LEFT, padx=4, pady=2)
 
             fg = C["text_dim"] if chk else C["text"]
-            tk.Label(row, text=f"  {item['text']}", font=("Arial", 13),
+            tk.Label(row, text=f"  {item['text']}", font=("Arial", 30),
                      bg=bg, fg=fg, anchor="w"
                      ).pack(side=tk.LEFT, fill=tk.X, expand=True, pady=2)
 
@@ -1196,7 +1293,7 @@ class ShoppingListScreen(tk.Frame):
             ("📧 Enviar",   C["warning"],   C["bg"],   self._show_send),
             ("🗑 Borrar ✓", C["accent"],    C["text"], self._del_checked),
         ]:
-            tk.Button(self.foot, text=txt, font=("Arial", 10, "bold"),
+            tk.Button(self.foot, text=txt, font=("Arial", 26, "bold"),
                 bg=bg, fg=fg, activebackground=C["accent_hi"],
                 relief=tk.FLAT, bd=0, padx=6,
                 command=cmd).pack(side=tk.LEFT, padx=3, pady=5, expand=True, fill=tk.X)
@@ -1224,10 +1321,10 @@ class ShoppingListScreen(tk.Frame):
         self._clear(self.body)
         self._clear(self.foot)
 
-        tk.Label(self.body, text="Nuevo artículo:", font=("Arial", 12),
+        tk.Label(self.body, text="Nuevo artículo:", font=("Arial", 22),
                  bg=C["bg"], fg=C["text"]).pack(anchor="w", padx=8, pady=(6, 2))
 
-        self._add_entry = tk.Entry(self.body, font=("Arial", 14),
+        self._add_entry = tk.Entry(self.body, font=("Arial", 30),
                                     bg=C["bg_card"], fg=C["text"],
                                     insertbackground=C["text"],
                                     relief=tk.FLAT, bd=2)
@@ -1238,7 +1335,7 @@ class ShoppingListScreen(tk.Frame):
                                         on_enter=self._do_add)
         self._add_kb.pack(fill=tk.X, padx=4)
 
-        tk.Button(self.foot, text="◀ Volver a la lista", font=("Arial", 11, "bold"),
+        tk.Button(self.foot, text="◀ Volver a la lista", font=("Arial", 22, "bold"),
                   bg=C["accent"], fg=C["text"], activebackground=C["accent_hi"],
                   relief=tk.FLAT, bd=0, padx=16,
                   command=self.refresh).pack(side=tk.LEFT, padx=4, pady=5,
@@ -1258,7 +1355,7 @@ class ShoppingListScreen(tk.Frame):
         self._clear(self.body)
         self._clear(self.foot)
 
-        tk.Label(self.body, text="Enviar lista a:", font=("Arial", 13, "bold"),
+        tk.Label(self.body, text="Enviar lista a:", font=("Arial", 30, "bold"),
                  bg=C["bg"], fg=C["text"]).pack(anchor="w", padx=8, pady=4)
 
         dist = self.app.cfg.get("distribution_list", [])
@@ -1270,27 +1367,27 @@ class ShoppingListScreen(tk.Frame):
                           highlightbackground=C["border"], highlightthickness=1)
             rf.pack(fill=tk.X, padx=8, pady=2)
             tk.Checkbutton(rf, text=f"  {p['name']}  ({p['email']})",
-                           variable=v, font=("Arial", 11),
+                           variable=v, font=("Arial", 22),
                            bg=C["bg_card"], fg=C["text"],
                            selectcolor=C["bg"],
                            activebackground=C["bg_card"],
                            activeforeground=C["text"]).pack(anchor="w", padx=8, pady=4)
 
         # preview
-        tk.Label(self.body, text="Artículos pendientes:", font=("Arial", 11),
+        tk.Label(self.body, text="Artículos pendientes:", font=("Arial", 22),
                  bg=C["bg"], fg=C["text_muted"]).pack(anchor="w", padx=8, pady=(8, 2))
         preview = "\n".join(f"  • {i}" for i in unchecked[:6])
         if len(unchecked) > 6:
             preview += f"\n  … y {len(unchecked)-6} más"
-        tk.Label(self.body, text=preview, font=("Arial", 10), bg=C["bg"],
+        tk.Label(self.body, text=preview, font=("Arial", 20), bg=C["bg"],
                  fg=C["text"], justify=tk.LEFT, anchor="nw").pack(anchor="w", padx=8)
 
         # footer
-        tk.Button(self.foot, text="◀ Cancelar", font=("Arial", 11, "bold"),
+        tk.Button(self.foot, text="◀ Cancelar", font=("Arial", 22, "bold"),
                   bg=C["accent"], fg=C["text"], relief=tk.FLAT, bd=0, padx=14,
                   command=self.refresh).pack(side=tk.LEFT, padx=4, pady=5,
                                              expand=True, fill=tk.X)
-        tk.Button(self.foot, text="📧 Enviar", font=("Arial", 11, "bold"),
+        tk.Button(self.foot, text="📧 Enviar", font=("Arial", 22, "bold"),
                   bg=C["success"], fg=C["bg"], relief=tk.FLAT, bd=0, padx=14,
                   command=self._do_send).pack(side=tk.LEFT, padx=4, pady=5,
                                               expand=True, fill=tk.X)
@@ -1313,10 +1410,10 @@ class ShoppingListScreen(tk.Frame):
     def _send_done(self, ok):
         self._clear(self.body)
         if ok:
-            tk.Label(self.body, text="✓ Lista enviada", font=("Arial", 18, "bold"),
+            tk.Label(self.body, text="✓ Lista enviada", font=("Arial", 30, "bold"),
                      bg=C["bg"], fg=C["success"]).pack(pady=60)
         else:
-            tk.Label(self.body, text="✗ Error al enviar", font=("Arial", 18, "bold"),
+            tk.Label(self.body, text="✗ Error al enviar", font=("Arial", 30, "bold"),
                      bg=C["bg"], fg=C["accent"]).pack(pady=60)
         self.after(1500, self.refresh)
 
@@ -1325,6 +1422,160 @@ class ShoppingListScreen(tk.Frame):
     def _clear(frame):
         for w in frame.winfo_children():
             w.destroy()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# SCREEN: TAREAS (Tasks)
+# ═══════════════════════════════════════════════════════════════════════
+
+class TareasScreen(tk.Frame):
+    ITEMS_PER_PAGE = 7
+
+    def __init__(self, parent, app):
+        super().__init__(parent, bg=C["bg"])
+        self.app = app
+        self.scroll = 0
+        self._build_skeleton()
+
+    def _build_skeleton(self):
+        hdr = tk.Frame(self, bg=C["bg_header"], height=42)
+        hdr.pack(fill=tk.X)
+        hdr.pack_propagate(False)
+        tk.Label(hdr, text="📋 Tareas Mensuales", font=("Arial", 30, "bold"),
+                 bg=C["bg_header"], fg=C["text"]).pack(side=tk.LEFT, padx=12)
+
+        self.body = tk.Frame(self, bg=C["bg"])
+        self.body.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+
+        self.foot = tk.Frame(self, bg=C["bg_header"], height=48)
+        self.foot.pack(fill=tk.X, side=tk.BOTTOM)
+        self.foot.pack_propagate(False)
+
+    def refresh(self):
+        self._clear(self.body)
+        self._build_footer_buttons()
+
+        items = self.app.tareas_mgr.get_items()
+        if not items:
+            tk.Label(self.body, text="No hay tareas configuradas.",
+                     font=("Arial", 30), bg=C["bg"],
+                     fg=C["text_muted"]).pack(pady=50)
+            return
+
+        indexed = sorted(enumerate(items), key=lambda x: x[1]["checked"])
+        total = len(indexed)
+        page = indexed[self.scroll : self.scroll + self.ITEMS_PER_PAGE]
+
+        if total > self.ITEMS_PER_PAGE:
+            nav = tk.Frame(self.body, bg=C["bg"])
+            nav.pack(fill=tk.X, pady=1)
+            if self.scroll > 0:
+                tk.Button(nav, text="▲", font=("Arial", 22), bg=C["key_sp"],
+                    fg=C["text"], relief=tk.FLAT, bd=0,
+                    command=self._pgup).pack(side=tk.LEFT, padx=4)
+            tk.Label(nav, text=f"{self.scroll+1}–{min(self.scroll+self.ITEMS_PER_PAGE, total)} / {total}",
+                     font=("Arial", 20), bg=C["bg"], fg=C["text_muted"]).pack(side=tk.LEFT, expand=True)
+            if self.scroll + self.ITEMS_PER_PAGE < total:
+                tk.Button(nav, text="▼", font=("Arial", 22), bg=C["key_sp"],
+                    fg=C["text"], relief=tk.FLAT, bd=0,
+                    command=self._pgdn).pack(side=tk.RIGHT, padx=4)
+
+        for orig_idx, item in page:
+            chk = item["checked"]
+            bg = C["checked_bg"] if chk else C["bg_card"]
+
+            row = tk.Frame(self.body, bg=bg,
+                           highlightbackground=C["border"], highlightthickness=1)
+            row.pack(fill=tk.X, pady=2)
+
+            sym = "☑" if chk else "☐"
+            tk.Button(row, text=sym, font=("Arial", 30), bg=bg,
+                      fg=C["success"] if chk else C["text"],
+                      relief=tk.FLAT, bd=0, width=2,
+                      command=lambda i=orig_idx: self._toggle(i)
+                      ).pack(side=tk.LEFT, padx=4, pady=2)
+
+            fg = C["text_dim"] if chk else C["text"]
+            tk.Label(row, text=f"  {item['text']}", font=("Arial", 30),
+                     bg=bg, fg=fg, anchor="w"
+                     ).pack(side=tk.LEFT, fill=tk.X, expand=True, pady=2)
+
+    def _toggle(self, idx):
+        self.app.tareas_mgr.toggle(idx)
+        self.refresh()
+
+    def _pgup(self):
+        self.scroll = max(0, self.scroll - self.ITEMS_PER_PAGE)
+        self.refresh()
+
+    def _pgdn(self):
+        self.scroll += self.ITEMS_PER_PAGE
+        self.refresh()
+
+    # ── footer buttons ────────────────────────────────────────────────
+    def _build_footer_buttons(self):
+        self._clear(self.foot)
+        for txt, bg, fg, cmd in [
+            ("◀ Volver",    C["secondary"], C["text"], self.app.show_calendar),
+            ("➕ Añadir",   C["success"],   C["bg"],   self._show_add),
+            ("🗑 Borrar ✓", C["accent"],    C["text"], self._del_checked),
+        ]:
+            tk.Button(self.foot, text=txt, font=("Arial", 26, "bold"),
+                bg=bg, fg=fg, activebackground=C["accent_hi"],
+                relief=tk.FLAT, bd=0, padx=6,
+                command=cmd).pack(side=tk.LEFT, padx=3, pady=5, expand=True, fill=tk.X)
+
+    def _del_checked(self):
+        self.app.tareas_mgr.remove_checked()
+        self.scroll = 0
+        self.refresh()
+
+    # ── add item mode ─────────────────────────────────────────────────
+    def _show_add(self):
+        self._clear(self.body)
+        self._clear(self.foot)
+
+        tk.Label(self.body, text="Nueva tarea:", font=("Arial", 22),
+                 bg=C["bg"], fg=C["text"]).pack(anchor="w", padx=8, pady=(6, 2))
+
+        self._add_entry = tk.Entry(self.body, font=("Arial", 30),
+                                    bg=C["bg_card"], fg=C["text"],
+                                    insertbackground=C["text"],
+                                    relief=tk.FLAT, bd=2)
+        self._add_entry.pack(fill=tk.X, padx=8, pady=4)
+        self._add_entry.focus_set()
+
+        self._add_kb = SpanishKeyboard(self.body, self._add_entry,
+                                        on_enter=self._do_add)
+        self._add_kb.pack(fill=tk.X, padx=4)
+
+        tk.Button(self.foot, text="◀ Volver a la lista", font=("Arial", 22, "bold"),
+                  bg=C["accent"], fg=C["text"], activebackground=C["accent_hi"],
+                  relief=tk.FLAT, bd=0, padx=16,
+                  command=self.refresh).pack(side=tk.LEFT, padx=4, pady=5,
+                                             expand=True, fill=tk.X)
+
+    def _do_add(self):
+        txt = self._add_entry.get().strip()
+        if txt:
+            self.app.tareas_mgr.add_item(txt)
+            self._add_entry.delete(0, tk.END)
+
+    @staticmethod
+    def _clear(frame):
+        for w in frame.winfo_children():
+            w.destroy()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# SCREEN: NIGHT MODE
+# ═══════════════════════════════════════════════════════════════════════
+
+class NightScreen(tk.Frame):
+    def __init__(self, parent, app):
+        super().__init__(parent, bg="black")
+        self.app = app
+        # Una pantalla completamente negra. Los toques se interceptan globalmente en DigitalFrame.
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1338,6 +1589,7 @@ class DigitalFrame(tk.Tk):
         self.cfg      = load_config()
         self.cities   = self.cfg.get("cities", [])
         self.shopping = ShoppingListManager()
+        self.tareas_mgr = TareasManager()
         self.weather  = WeatherCache(self.cities)
         self.msg_q    = queue.Queue()
 
@@ -1351,21 +1603,28 @@ class DigitalFrame(tk.Tk):
             pass
         self.bind("<Escape>", lambda e: self._quit())
 
-        # hide cursor after inactivity
+        # handle inactivity for cursor and night mode
         self._cursor_job = None
-        self.bind("<Motion>", self._motion)
+        self._last_activity = time.time()
+        self.bind_all("<Motion>", self._on_activity, add="+")
+        self.bind_all("<Button-1>", self._on_activity, add="+")
+        self.bind_all("<Key>", self._on_activity, add="+")
 
         # ── screens ──────────────────────────────────────────────────
         self.slideshow = SlideshowScreen(self, self)
         self.calendar  = CalendarScreen(self, self)
         self.event_scr = EventCreationScreen(self, self)
         self.shop_scr  = ShoppingListScreen(self, self)
+        self.tareas_scr = TareasScreen(self, self)
+        self.night_scr = NightScreen(self, self)
 
         self._screens = {
             "slide":    self.slideshow,
             "cal":      self.calendar,
             "event":    self.event_scr,
             "shop":     self.shop_scr,
+            "tareas":   self.tareas_scr,
+            "night":    self.night_scr,
         }
         self._current = None
 
@@ -1376,6 +1635,7 @@ class DigitalFrame(tk.Tk):
         self.poller = EmailPoller(self.cfg, self.shopping, self.msg_q)
         self.poller.start()
         self._poll_queue()
+        self._check_night_mode()
 
         # pre-fetch weather
         threading.Thread(target=self.weather.fetch_all, daemon=True).start()
@@ -1406,6 +1666,39 @@ class DigitalFrame(tk.Tk):
         self._switch("shop")
         self.shop_scr.refresh()
 
+    def show_tareas(self):
+        self.tareas_scr.scroll = 0
+        self._switch("tareas")
+        self.tareas_scr.refresh()
+
+    def show_night(self):
+        self._switch("night")
+
+    # ── night mode ───────────────────────────────────────────────────
+    def _check_night_mode(self):
+        now = datetime.datetime.now()
+        start = self.cfg.get("night_mode_start_h", 20)
+        end = self.cfg.get("night_mode_end_h", 8)
+        timeout = self.cfg.get("night_mode_timeout_sec", 60)
+        
+        if start > end:
+            is_night = (now.hour >= start) or (now.hour < end)
+        elif start < end:
+            is_night = start <= now.hour < end
+        else:
+            is_night = False
+
+        if is_night:
+            if time.time() - self._last_activity > timeout:
+                if self._current != "night":
+                    self.show_night()
+        else:
+            if self._current == "night":
+                self._last_activity = time.time()
+                self.show_slideshow()
+                
+        self.after(5000, self._check_night_mode)
+
     # ── background queue ─────────────────────────────────────────────
     def _poll_queue(self):
         try:
@@ -1419,12 +1712,17 @@ class DigitalFrame(tk.Tk):
             pass
         self.after(1000, self._poll_queue)
 
-    # ── cursor auto-hide ─────────────────────────────────────────────
-    def _motion(self, _):
+    # ── interactivity & cursor auto-hide ─────────────────────────────
+    def _on_activity(self, event=None):
+        self._last_activity = time.time()
+        
         self.configure(cursor="")
         if self._cursor_job:
             self.after_cancel(self._cursor_job)
         self._cursor_job = self.after(3000, lambda: self.configure(cursor="none"))
+        
+        if self._current == "night":
+            self.show_slideshow()
 
     # ── cleanup ──────────────────────────────────────────────────────
     def _quit(self):
