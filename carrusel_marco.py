@@ -9,6 +9,7 @@ Features:
   - Event creation: sends .ics calendar invite to distribution list
   - Background email polling every 30s for "compra" and "foto" subjects
   - To do list
+  - Ready for automatic download
 
 Dependencies:
   pip install Pillow icalendar recurring-ical-events requests
